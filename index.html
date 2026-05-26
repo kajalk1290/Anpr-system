@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ANPR — Automatic Number Plate Recognition</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@300;500;700&display=swap');
+
+  :root {
+    --bg: #050a0f;
+    --surface: #0d1117;
+    --surface2: #161b22;
+    --border: #21262d;
+    --green: #00ff88;
+    --green-dim: #00cc6a;
+    --amber: #ffb800;
+    --red: #ff4455;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-ui: 'Space Grotesk', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,255,136,0.015) 2px,
+      rgba(0,255,136,0.015) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 40px; height: 40px;
+    background: var(--green);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+
+  .logo-text {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 2px;
+  }
+
+  .logo-sub {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .status-dot {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--green);
+  }
+
+  .dot {
+    width: 8px; height: 8px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,136,0.4); }
+    50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(0,255,136,0); }
+  }
+
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 0;
+    height: calc(100vh - 70px);
+  }
+
+  /* Left Panel */
+  .left {
+    padding: 24px;
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--surface2);
+    padding: 4px;
+    border-radius: 10px;
+    width: fit-content;
+  }
+
+  .tab {
+    padding: 8px 20px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+    color: var(--muted);
+    border: none;
+    background: transparent;
+    font-family: var(--font-ui);
+  }
+
+  .tab.active {
+    background: var(--green);
+    color: #000;
+    font-weight: 700;
+  }
+
+  .tab:hover:not(.active) { color: var(--text); }
+
+  /* Upload Area */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+  }
+
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--green);
+    background: rgba(0,255,136,0.04);
+  }
+
+  .upload-icon { font-size: 40px; margin-bottom: 12px; }
+  .upload-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .upload-sub { font-size: 13px; color: var(--muted); }
+
+  #file-input { display: none; }
+
+  .btn {
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+  }
+
+  .btn-green {
+    background: var(--green);
+    color: #000;
+  }
+
+  .btn-green:hover { background: var(--green-dim); transform: translateY(-1px); }
+  .btn-green:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .btn-outline {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .btn-outline:hover { border-color: var(--green); color: var(--green); }
+
+  /* Image Preview & Result */
+  .result-container {
+    background: var(--surface);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .result-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  #result-img {
+    width: 100%;
+    max-height: 420px;
+    object-fit: contain;
+    display: block;
+    background: #000;
+  }
+
+  .placeholder-img {
+    width: 100%;
+    height: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* Plates detected */
+  .plates-section {
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .plates-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .badge {
+    background: var(--green);
+    color: #000;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-family: var(--font-mono);
+  }
+
+  .badge.zero { background: var(--muted); }
+
+  .plate-card {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .plate-card:last-child { border-bottom: none; }
+
+  .plate-number {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 3px;
+  }
+
+  .plate-conf {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .conf-bar {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 4px;
+    width: 80px;
+  }
+
+  .conf-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--green);
+    transition: width 0.5s ease;
+  }
+
+  .empty-plates {
+    padding: 24px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  /* Webcam */
+  .webcam-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .cam-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  #webcam-feed {
+    width: 100%;
+    border-radius: 12px;
+    background: #000;
+    border: 1px solid var(--border);
+    display: block;
+  }
+
+  /* FIX: canvas overlays video for annotated frame display */
+  .webcam-wrapper {
+    position: relative;
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid var(--border);
+  }
+  #webcam-feed {
+    width: 100%;
+    display: block;
+    border-radius: 0;
+    border: none;
+  }
+  #webcam-canvas {
+    display: none; /* hidden capture canvas */
+  }
+  #webcam-annotated {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: none;
+    border-radius: 0;
+  }
+
+  .cam-status {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* Right Panel - Log */
+  .right {
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .log-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .log-entries {
+    overflow-y: auto;
+    flex: 1;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .log-entry {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 10px 12px;
+    border-left: 3px solid var(--green);
+    animation: slideIn 0.3s ease;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(10px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .log-time {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .log-plates {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 2px;
+  }
+
+  .log-source {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .log-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    font-family: var(--font-mono);
+  }
+
+  /* Loading */
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5,10,15,0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    z-index: 500;
+  }
+
+  .loading-overlay.show { display: flex; }
+
+  .spinner {
+    width: 48px; height: 48px;
+    border: 3px solid var(--border);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-text {
+    font-family: var(--font-mono);
+    color: var(--green);
+    font-size: 14px;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.3s;
+    z-index: 600;
+  }
+
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.success { background: var(--green); color: #000; }
+  .toast.error { background: var(--red); color: #fff; }
+  .toast.info { background: var(--amber); color: #000; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  .section-panel { display: none; }
+  .section-panel.active { display: flex; flex-direction: column; gap: 16px; }
+
+  video { border-radius: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🚗</div>
+    <div>
+      <div class="logo-text">ANPR</div>
+      <div class="logo-sub">Automatic Number Plate Recognition</div>
+    </div>
+  </div>
+  <div class="status-dot">
+    <div class="dot"></div>
+    SYSTEM ONLINE
+  </div>
+</header>
+
+<div class="main">
+  <!-- Left Panel -->
+  <div class="left">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('upload')">📷 Upload Image</button>
+      <button class="tab" onclick="switchTab('webcam')">🎥 Live Camera</button>
+    </div>
+
+    <!-- Upload Panel -->
+    <div id="panel-upload" class="section-panel active">
+      <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <div class="upload-icon">⬆️</div>
+        <div class="upload-title">Drop vehicle image here</div>
+        <div class="upload-sub">Supports JPG, PNG, BMP, WEBP — Max 16MB</div>
+        <input type="file" id="file-input" accept="image/*">
+      </div>
+
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button class="btn btn-green" id="analyze-btn" disabled onclick="analyzeUpload()">
+          🔍 Detect Plates
+        </button>
+        <span id="filename-label" style="font-size:13px; color:var(--muted); font-family:var(--font-mono);"></span>
+      </div>
+
+      <div class="result-container">
+        <div class="result-header">
+          <span>OUTPUT FRAME</span>
+          <span id="img-dims">—</span>
+        </div>
+        <div id="img-placeholder" class="placeholder-img">
+          <span>📸</span>
+          <span>Upload an image to begin</span>
+        </div>
+        <img id="result-img" style="display:none;" alt="Detected result">
+      </div>
+
+      <div class="plates-section">
+        <div class="plates-header">
+          Detected Plates
+          <span class="badge zero" id="plate-count">0</span>
+        </div>
+        <div id="plates-list">
+          <div class="empty-plates">No plates detected yet</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Webcam Panel -->
+    <div id="panel-webcam" class="section-panel">
+      <div class="webcam-section">
+        <div class="cam-controls">
+          <button class="btn btn-green" id="start-cam-btn" onclick="startWebcam()">▶ Start Camera</button>
+          <button class="btn btn-outline" id="stop-cam-btn" onclick="stopWebcam()" style="display:none;">■ Stop</button>
+          <span class="cam-status" id="cam-status">Camera off</span>
+        </div>
+        <div class="webcam-wrapper">
+          <video id="webcam-feed" autoplay playsinline muted></video>
+          <img id="webcam-annotated" alt="annotated">
+        </div>
+        <canvas id="webcam-canvas"></canvas>
+
+        <div class="plates-section">
+          <div class="plates-header">
+            Live Detections
+            <span class="badge zero" id="live-plate-count">0</span>
+          </div>
+          <div id="live-plates-list">
+            <div class="empty-plates">Start camera to detect plates</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Panel - Log -->
+  <div class="right">
+    <div class="log-header">
+      <span>📋 Detection Log</span>
+      <button class="btn btn-outline" style="padding:6px 12px; font-size:12px;" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="log-entries" id="log-entries">
+      <div class="log-empty">// No detections logged</div>
+    </div>
+  </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">Processing image...</div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+let uploadedFile = null;
+let webcamStream = null;
+let webcamInterval = null;
+let isProcessingFrame = false;
+
+// --- Tab Switch ---
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('panel-' + tab).classList.add('active');
+}
+
+// --- File Upload ---
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+});
+
+function handleFile(file) {
+  uploadedFile = file;
+  document.getElementById('filename-label').textContent = file.name;
+  document.getElementById('analyze-btn').disabled = false;
+  // Preview
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('img-placeholder').style.display = 'none';
+    const img = document.getElementById('result-img');
+    img.src = e.target.result;
+    img.style.display = 'block';
+    img.onload = () => {
+      document.getElementById('img-dims').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+    };
+  };
+  reader.readAsDataURL(file);
+}
+
+async function analyzeUpload() {
+  if (!uploadedFile) return;
+  showLoading('Detecting plates...');
+  const formData = new FormData();
+  formData.append('image', uploadedFile);
+
+  try {
+    const res = await fetch('/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    hideLoading();
+
+    if (data.error) { showToast(data.error, 'error'); return; }
+
+    // Show annotated image
+    const img = document.getElementById('result-img');
+    img.src = 'data:image/jpeg;base64,' + data.image;
+    img.style.display = 'block';
+    document.getElementById('img-placeholder').style.display = 'none';
+
+    // Show plates
+    renderPlates(data.plates, 'plates-list', 'plate-count');
+    refreshLog();
+    showToast(`${data.count} plate(s) detected`, data.count > 0 ? 'success' : 'info');
+  } catch (err) {
+    hideLoading();
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
+function renderPlates(plates, listId, countId) {
+  const list = document.getElementById(listId);
+  const badge = document.getElementById(countId);
+  badge.textContent = plates.length;
+  badge.className = 'badge' + (plates.length === 0 ? ' zero' : '');
+
+  if (plates.length === 0) {
+    list.innerHTML = '<div class="empty-plates">No plates detected in this image</div>';
+    return;
+  }
+
+  list.innerHTML = plates.map(p => `
+    <div class="plate-card">
+      <div>
+        <div class="plate-number">${p.best_text || '—'}</div>
+        <div class="conf-bar"><div class="conf-fill" style="width:${p.confidence}%"></div></div>
+      </div>
+      <div style="text-align:right;">
+        <div class="plate-conf">${p.confidence.toFixed(1)}% conf</div>
+        <div style="margin-top:4px;">
+          <button class="btn btn-outline" style="padding:4px 10px;font-size:11px;" onclick="copyText('${p.best_text}')">Copy</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// --- Webcam ---
+async function startWebcam() {
+  try {
+    // FIX: Check if getUserMedia is available (requires localhost or HTTPS)
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast('Camera not supported. Use localhost or HTTPS.', 'error');
+      return;
+    }
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' }
+    });
+    const video = document.getElementById('webcam-feed');
+    video.srcObject = webcamStream;
+    document.getElementById('start-cam-btn').style.display = 'none';
+    document.getElementById('stop-cam-btn').style.display = 'inline-block';
+    document.getElementById('cam-status').textContent = '● Recording';
+    document.getElementById('cam-status').style.color = 'var(--green)';
+    // Process frame every 2 seconds
+    webcamInterval = setInterval(processWebcamFrame, 2000);
+  } catch (err) {
+    let msg = 'Camera error: ' + err.message;
+    if (err.name === 'NotAllowedError') msg = 'Camera permission denied. Allow access in browser settings.';
+    if (err.name === 'NotFoundError') msg = 'No camera found on this device.';
+    showToast(msg, 'error');
+  }
+}
+
+function stopWebcam() {
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(t => t.stop());
+    webcamStream = null;
+  }
+  clearInterval(webcamInterval);
+  document.getElementById('start-cam-btn').style.display = 'inline-block';
+  document.getElementById('stop-cam-btn').style.display = 'none';
+  document.getElementById('cam-status').textContent = 'Camera off';
+  document.getElementById('cam-status').style.color = 'var(--muted)';
+}
+
+async function processWebcamFrame() {
+  if (isProcessingFrame) return;
+  isProcessingFrame = true;
+
+  const video = document.getElementById('webcam-feed');
+  if (!video.videoWidth || !video.videoHeight) {
+    isProcessingFrame = false;
+    return;
+  }
+
+  const canvas = document.getElementById('webcam-canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  const frame = canvas.toDataURL('image/jpeg', 0.85);
+
+  try {
+    const res = await fetch('/webcam_frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frame })
+    });
+
+    if (!res.ok) {
+      isProcessingFrame = false;
+      return;
+    }
+
+    const data = await res.json();
+    if (!data.error && data.count > 0) {
+      // FIX: Use overlay <img> instead of drawing on canvas (avoids CORS/timing issues)
+      const annotated = document.getElementById('webcam-annotated');
+      annotated.src = 'data:image/jpeg;base64,' + data.image;
+      annotated.style.display = 'block';
+      // Hide after 1.5s to show live feed again
+      setTimeout(() => { annotated.style.display = 'none'; }, 1500);
+
+      renderPlates(data.plates, 'live-plates-list', 'live-plate-count');
+      refreshLog();
+    }
+  } catch (e) { /* silent fail in auto mode */ }
+  isProcessingFrame = false;
+}
+
+// --- Log ---
+async function refreshLog() {
+  try {
+    const res = await fetch('/log');
+    const data = await res.json();
+    const container = document.getElementById('log-entries');
+    if (data.length === 0) {
+      container.innerHTML = '<div class="log-empty">// No detections logged</div>';
+      return;
+    }
+    container.innerHTML = data.map(e => `
+      <div class="log-entry">
+        <div class="log-time">${e.timestamp}</div>
+        <div class="log-plates">${e.plates.join(' | ') || 'NONE'}</div>
+        <div class="log-source">from: ${e.filename} • ${e.count} plate(s)</div>
+      </div>
+    `).join('');
+  } catch (e) {}
+}
+
+async function clearLog() {
+  await fetch('/clear_log', { method: 'POST' });
+  refreshLog();
+}
+
+// --- Utilities ---
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => showToast(`Copied: ${text}`, 'success'));
+}
+
+function showLoading(msg) {
+  document.getElementById('loading-text').textContent = msg || 'Processing...';
+  document.getElementById('loading').classList.add('show');
+}
+
+function hideLoading() {
+  document.getElementById('loading').classList.remove('show');
+}
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+// Refresh log periodically
+setInterval(refreshLog, 5000);
+refreshLog();
+</script>
+</body>
+</html>
